@@ -69,7 +69,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 curl -X POST "http://localhost:8000/transcribe" \
   -H "accept: application/x-subrip" \
   -H "Content-Type: multipart/form-data" \
-  -F "file=@audio.mp3" \
+  -F "file=@input/audio_short.mp3" \
   --output result.srt
 
 # Через Python
