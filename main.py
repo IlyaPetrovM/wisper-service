@@ -1,9 +1,10 @@
 import os
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
+from enum import Enum
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.responses import Response
 from faster_whisper import WhisperModel
 import logging
@@ -17,25 +18,41 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Инициализация модели при старте приложения
-model: Optional[WhisperModel] = None
+# Доступные модели
+class ModelSize(str, Enum):
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+
+# Хранилище загруженных моделей
+models: Dict[str, WhisperModel] = {}
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Загрузка модели Whisper при старте сервиса"""
-    global model
-    logger.info("Загрузка модели Whisper (medium)...")
+def load_model(model_size: str) -> WhisperModel:
+    """Загрузка конкретной модели Whisper"""
+    logger.info(f"Загрузка модели Whisper ({model_size})...")
 
-    # Используем CPU режим и модель medium
     model = WhisperModel(
-        "medium",
+        model_size,
         device="cpu",
         compute_type="int8",  # Оптимизация для CPU
         download_root="./models"  # Локальное хранение модели
     )
 
-    logger.info("Модель загружена успешно")
+    logger.info(f"Модель {model_size} загружена успешно")
+    return model
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Загрузка моделей Whisper при старте сервиса"""
+    global models
+
+    # Загружаем только medium модель при старте для экономии памяти
+    # Остальные модели будут загружаться по требованию
+    logger.info("Инициализация сервиса транскрибации...")
+    models[ModelSize.SMALL] = load_model(ModelSize.SMALL)
+    logger.info("Сервис готов к работе")
 
 
 def format_timestamp(seconds: float) -> str:
@@ -71,15 +88,33 @@ def generate_srt(segments) -> str:
     response_description="SRT файл с транскрипцией"
 )
 async def transcribe_audio(
-    file: UploadFile = File(..., description="Аудио файл для транскрибирования")
+    file: UploadFile = File(..., description="Аудио файл для транскрибирования"),
+    model_size: ModelSize = Query(
+        default=ModelSize.SMALL,
+        description="Размер модели Whisper: small (быстрая, менее точная), medium (балансная), large (медленная, наиболее точная)"
+    )
 ):
     """
     Транскрибирование аудио файла в SRT формат.
 
     Поддерживаемые форматы: mp3, wav, m4a, flac, ogg, и другие форматы, поддерживаемые FFmpeg
+
+    Параметры:
+    - file: Аудио файл для транскрибирования
+    - model_size: Размер модели (small/medium/large). По умолчанию: medium
     """
-    if model is None:
-        raise HTTPException(status_code=503, detail="Модель еще не загружена")
+    # Проверка и загрузка модели по требованию
+    if model_size not in models:
+        logger.info(f"Модель {model_size} не загружена, загружаем...")
+        try:
+            models[model_size] = load_model(model_size)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ошибка загрузки модели {model_size}: {str(e)}"
+            )
+
+    model = models[model_size]
 
     # Проверка расширения файла
     allowed_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.opus', '.webm'}
@@ -141,7 +176,8 @@ async def root():
     return {
         "service": "Whisper Transcription Service",
         "status": "running",
-        "model": "medium",
+        "available_models": [m.value for m in ModelSize],
+        "loaded_models": list(models.keys()),
         "language": "ru"
     }
 
@@ -151,5 +187,32 @@ async def health_check():
     """Проверка здоровья сервиса"""
     return {
         "status": "healthy",
-        "model_loaded": model is not None
+        "models_loaded": len(models) > 0,
+        "available_models": [m.value for m in ModelSize],
+        "loaded_models": list(models.keys())
+    }
+
+
+@app.get("/models", summary="Список доступных моделей")
+async def list_models():
+    """Получить информацию о доступных моделях"""
+    return {
+        "available_models": {
+            "small": {
+                "size": "small",
+                "description": "Быстрая модель, менее точная транскрипция",
+                "loaded": ModelSize.SMALL in models
+            },
+            "medium": {
+                "size": "medium",
+                "description": "Балансная модель (по умолчанию)",
+                "loaded": ModelSize.MEDIUM in models
+            },
+            "large": {
+                "size": "large",
+                "description": "Наиболее точная модель, медленная работа",
+                "loaded": ModelSize.LARGE in models
+            }
+        },
+        "currently_loaded": list(models.keys())
     }

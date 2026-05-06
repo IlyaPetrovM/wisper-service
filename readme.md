@@ -66,11 +66,19 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ```bash
 # Через curl
-curl -X POST "http://localhost:8000/transcribe" \
+
+curl -X POST "http://localhost:8000/transcribe?model_size=small" \
   -H "accept: application/x-subrip" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@input/audio_short.mp3" \
-  --output result.srt
+  --output result_large.srt
+
+
+curl -X POST "http://localhost:8000/transcribe?model_size=large" \
+  -H "accept: application/x-subrip" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@input/audio_short.mp3" \
+  --output result_large.srt
 
 # Через Python
 import requests
