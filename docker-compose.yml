@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  whisper-service:
+    build: .
+    container_name: whisper-transcription-service
+    ports:
+      - "8000:8000"
+    volumes:
+      # Хранение моделей на хосте для переиспользования между перезапусками
+      - ./models:/app/models
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
