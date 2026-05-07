@@ -1,11 +1,12 @@
 import os
+import json
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Generator
 from enum import Enum
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from faster_whisper import WhisperModel
 import logging
 
@@ -81,27 +82,52 @@ def generate_srt(segments) -> str:
     return "\n".join(srt_content)
 
 
+def json_lines_generator(filename: str, segments, info) -> Generator[str, None, None]:
+    """Генерирование JSON Lines из сегментов транскрипции"""
+    for segment in segments:
+        message = {
+            "filename": filename,
+            "id": segment.id,
+            "start": segment.start,
+            "end": segment.end,
+            "text": segment.text,
+            "avg_logprob": segment.avg_logprob,
+            "compression_ratio": segment.compression_ratio,
+            "no_speech_prob": segment.no_speech_prob,
+            "language": info.language,
+            "language_probability": info.language_probability,
+            "duration": info.duration
+        }
+        yield json.dumps(message, ensure_ascii=False) + "\n"
+
+
 @app.post(
     "/transcribe",
     summary="Транскрибировать аудио файл",
-    description="Загрузите аудио файл для транскрибирования в SRT формат",
-    response_description="SRT файл с транскрипцией"
+    description="Загрузите аудио файл для транскрибирования",
+    response_description="Транскрипция в JSON Lines или SRT формате"
 )
 async def transcribe_audio(
     file: UploadFile = File(..., description="Аудио файл для транскрибирования"),
     model_size: ModelSize = Query(
         default=ModelSize.SMALL,
         description="Размер модели Whisper: small (быстрая, менее точная), medium (балансная), large (медленная, наиболее точная)"
+    ),
+    format: str = Query(
+        default="json",
+        regex="^(json|srt)$",
+        description="Формат ответа: json (JSON Lines, по умолчанию) или srt (SRT файл)"
     )
 ):
     """
-    Транскрибирование аудио файла в SRT формат.
+    Транскрибирование аудио файла.
 
     Поддерживаемые форматы: mp3, wav, m4a, flac, ogg, и другие форматы, поддерживаемые FFmpeg
 
     Параметры:
     - file: Аудио файл для транскрибирования
-    - model_size: Размер модели (small/medium/large). По умолчанию: medium
+    - model_size: Размер модели (small/medium/large). По умолчанию: small
+    - format: json (потоковая передача JSON Lines) или srt (SRT файл). По умолчанию: json
     """
     # Проверка и загрузка модели по требованию
     if model_size not in models:
@@ -126,6 +152,8 @@ async def transcribe_audio(
             detail=f"Неподдерживаемый формат файла. Поддерживаются: {', '.join(allowed_extensions)}"
         )
 
+    temp_audio_path = None
+
     # Сохранение загруженного файла во временную директорию
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
@@ -143,22 +171,28 @@ async def transcribe_audio(
             vad_parameters=dict(min_silence_duration_ms=500)
         )
 
+        # Материализуем segments в список (может быть генератор)
+        segments_list = list(segments)
+
         logger.info(f"Обнаружен язык: {info.language} (вероятность: {info.language_probability:.2f})")
-
-        # Генерация SRT
-        srt_content = generate_srt(segments)
-
         logger.info(f"Транскрибирование завершено: {file.filename}")
 
-        # Возвращаем SRT файл
-        filename_without_ext = Path(file.filename).stem
-        return Response(
-            content=srt_content,
-            media_type="application/x-subrip",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename_without_ext}.srt"'
-            }
-        )
+        # Возвращаем результат в зависимости от формата
+        if format == "srt":
+            srt_content = generate_srt(segments_list)
+            filename_without_ext = Path(file.filename).stem
+            return Response(
+                content=srt_content,
+                media_type="application/x-subrip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename_without_ext}.srt"'
+                }
+            )
+        else:  # json (по умолчанию)
+            return StreamingResponse(
+                json_lines_generator(file.filename, segments_list, info),
+                media_type="application/x-ndjson"
+            )
 
     except Exception as e:
         logger.error(f"Ошибка при транскрибировании: {str(e)}")
@@ -166,7 +200,7 @@ async def transcribe_audio(
 
     finally:
         # Удаление временного файла
-        if os.path.exists(temp_audio_path):
+        if temp_audio_path and os.path.exists(temp_audio_path):
             os.unlink(temp_audio_path)
 
 
