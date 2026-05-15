@@ -65,22 +65,20 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ### Транскрибирование аудио файла
 
 ```bash
-# Через curl
+# Через curl (загрузка файла)
 
 curl -X POST "http://localhost:8000/transcribe?model_size=small" \
   -H "accept: application/x-subrip" \
   -H "Content-Type: multipart/form-data" \
-  -F "file=@input/audio_short.mp3" \
-  --output result_large.srt
+  -F "file=@input/audio.mp3" \
+  --output result.srt
 
-
-curl -X POST "http://localhost:8000/transcribe?model_size=large" \
+# Через curl (по URL)
+curl -X POST "http://localhost:8000/transcribe?url=https://example.com/audio.mp3&model_size=small&format=srt" \
   -H "accept: application/x-subrip" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@input/audio_short.mp3" \
-  --output result_large.srt
+  --output result.srt
 
-# Через Python
+# Через Python (загрузка файла)
 import requests
 
 with open("audio.mp3", "rb") as f:
@@ -91,6 +89,22 @@ with open("audio.mp3", "rb") as f:
 
 with open("result.srt", "wb") as f:
     f.write(response.content)
+
+# Через Python (по URL)
+import requests
+
+response = requests.post(
+    "http://localhost:8000/transcribe",
+    params={
+        "url": "https://example.com/audio.mp3",
+        "model_size": "small",
+        "format": "json"
+    }
+)
+
+# Сохранение результата
+with open("result.jsonl", "w") as f:
+    f.write(response.text)
 ```
 
 ### Проверка статуса сервиса
@@ -109,7 +123,8 @@ curl http://localhost:8000/health
 |-------|----------|----------|
 | GET | `/` | Информация о сервисе |
 | GET | `/health` | Health check |
-| POST | `/transcribe` | Транскрибирование аудио файла |
+| POST | `/transcribe` | Транскрибирование аудио (загрузка файла или по URL) |
+| GET | `/models` | Информация о доступных моделях |
 | GET | `/docs` | Swagger UI документация |
 | GET | `/redoc` | ReDoc документация |
 
