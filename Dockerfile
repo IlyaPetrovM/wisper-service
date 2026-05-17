@@ -1,9 +1,7 @@
-FROM python:3.11
+FROM python:3.11.15-slim
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=mwader/static-ffmpeg:latest-amd64 /ffmpeg /usr/local/bin/
+COPY --from=mwader/static-ffmpeg:latest-amd64 /ffprobe /usr/local/bin/
 
 # Создание рабочей директории
 WORKDIR /app
