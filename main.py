@@ -2,11 +2,12 @@ import os
 import json
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Generator
+from typing import Dict, Generator
 from enum import Enum
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
+from pydantic import BaseModel, Field
 from faster_whisper import WhisperModel
 import logging
 import requests
@@ -154,106 +155,129 @@ async def transcribe_file(audio_path: str, filename: str, model_size: ModelSize,
 @app.post(
     "/transcribe",
     summary="Транскрибировать аудио файл",
-    description="Загрузите аудио файл или укажите URL для транскрибирования",
+    description="Загрузите аудио файл для транскрибирования",
     response_description="Транскрипция в JSON Lines или SRT формате"
 )
 async def transcribe_audio(
-    file: Optional[UploadFile] = File(None, description="Аудио файл для транскрибирования"),
-    url: Optional[str] = Query(None, description="URL аудио файла для транскрибирования"),
+    file: UploadFile = File(description="Аудио файл для транскрибирования"),
     model_size: ModelSize = Query(
         default=ModelSize.SMALL,
         description="Размер модели Whisper: small (быстрая, менее точная), medium (балансная), large (медленная, наиболее точная)"
     ),
     format: str = Query(
-        default="json",
+        default="srt",
+        description="Формат ответа: json (JSON Lines с метаданными) или srt (SRT файл с временными кодами)",
         regex="^(json|srt)$",
-        description="Формат ответа: json (JSON Lines, по умолчанию) или srt (SRT файл)"
+        example="srt"
     )
 ):
     """
-    Транскрибирование аудио файла.
+    Транскрибирование загруженного аудио файла.
 
-    Поддерживаемые форматы: mp3, wav, m4a, flac, ogg, и другие форматы, поддерживаемые FFmpeg
-
-    Параметры:
-    - file: Аудио файл для транскрибирования (если не указан url)
-    - url: URL аудио файла (если не указан file)
-    - model_size: Размер модели (small/medium/large). По умолчанию: small
-    - format: json (потоковая передача JSON Lines) или srt (SRT файл). По умолчанию: json
+    Поддерживаемые форматы: mp3, wav, m4a, flac, ogg, opus, webm
     """
-    if not file and not url:
-        raise HTTPException(
-            status_code=400,
-            detail="Требуется передать либо файл (file), либо URL (url)"
-        )
-
-    if file and url:
-        raise HTTPException(
-            status_code=400,
-            detail="Нельзя передавать одновременно файл (file) и URL (url)"
-        )
-
     temp_audio_path = None
     filename = None
 
     try:
         allowed_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.opus', '.webm'}
 
-        if url:
-            # Скачивание файла по URL
-            logger.info(f"Начало скачивания файла: {url}")
-            response = requests.get(url, timeout=300)
-            response.raise_for_status()
+        # Проверка расширения файла
+        file_ext = Path(file.filename).suffix.lower()
 
-            # Определение расширения файла из URL или Content-Type
-            parsed_url = Path(url.split('?')[0])
-            file_ext = parsed_url.suffix.lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Неподдерживаемый формат файла. Поддерживаются: {', '.join(allowed_extensions)}"
+            )
 
-            if not file_ext:
-                content_type = response.headers.get('content-type', '').lower()
-                ext_map = {
-                    'audio/mpeg': '.mp3',
-                    'audio/wav': '.wav',
-                    'audio/x-wav': '.wav',
-                    'audio/mp4': '.m4a',
-                    'audio/flac': '.flac',
-                    'audio/ogg': '.ogg',
-                    'audio/opus': '.opus',
-                    'video/webm': '.webm'
-                }
-                file_ext = next((v for k, v in ext_map.items() if k in content_type), '.mp3')
+        # Сохранение загруженного файла во временную директорию
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
+            content = await file.read()
+            temp_audio.write(content)
+            temp_audio_path = temp_audio.name
 
-            if file_ext not in allowed_extensions:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Неподдерживаемый формат файла. Поддерживаются: {', '.join(allowed_extensions)}"
-                )
+        filename = file.filename
+        response = await transcribe_file(temp_audio_path, filename, model_size, format)
 
-            # Сохранение скачанного файла во временную директорию
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
-                temp_audio.write(response.content)
-                temp_audio_path = temp_audio.name
+        # Удаление временного файла только после успешной обработки
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            os.unlink(temp_audio_path)
+            logger.info(f"Временный файл удален: {temp_audio_path}")
 
-            logger.info(f"Файл успешно скачан: {url}")
-            filename = Path(url.split('?')[0]).name
+        return response
 
-        else:  # file
-            # Проверка расширения файла
-            file_ext = Path(file.filename).suffix.lower()
+    except Exception as e:
+        logger.error(f"Ошибка при транскрибировании: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка транскрибирования: {str(e)}")
 
-            if file_ext not in allowed_extensions:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Неподдерживаемый формат файла. Поддерживаются: {', '.join(allowed_extensions)}"
-                )
 
-            # Сохранение загруженного файла во временную директорию
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
-                content = await file.read()
-                temp_audio.write(content)
-                temp_audio_path = temp_audio.name
+@app.post(
+    "/transcribe-url",
+    summary="Транскрибировать аудио по URL",
+    description="Укажите URL аудио файла для транскрибирования",
+    response_description="Транскрипция в JSON Lines или SRT формате"
+)
+async def transcribe_audio_url(
+    url: str = Query(description="URL аудио файла для транскрибирования", example="https://example.com/audio.mp3"),
+    model_size: ModelSize = Query(
+        default=ModelSize.SMALL,
+        description="Размер модели Whisper: small (быстрая, менее точная), medium (балансная), large (медленная, наиболее точная)"
+    ),
+    format: str = Query(
+        default="srt",
+        description="Формат ответа: json (JSON Lines с метаданными) или srt (SRT файл с временными кодами)",
+        regex="^(json|srt)$",
+        example="srt"
+    )
+):
+    """
+    Транскрибирование аудио файла по URL.
 
-            filename = file.filename
+    Поддерживаемые форматы: mp3, wav, m4a, flac, ogg, opus, webm
+    """
+    temp_audio_path = None
+    filename = None
+
+    try:
+        allowed_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.opus', '.webm'}
+
+        # Скачивание файла по URL
+        logger.info(f"Начало скачивания файла: {url}")
+        response = requests.get(url, timeout=300)
+        response.raise_for_status()
+
+        # Определение расширения файла из URL или Content-Type
+        parsed_url = Path(url.split('?')[0])
+        file_ext = parsed_url.suffix.lower()
+
+        if not file_ext:
+            content_type = response.headers.get('content-type', '').lower()
+            ext_map = {
+                'audio/mpeg': '.mp3',
+                'audio/wav': '.wav',
+                'audio/x-wav': '.wav',
+                'audio/mp4': '.m4a',
+                'audio/flac': '.flac',
+                'audio/ogg': '.ogg',
+                'audio/opus': '.opus',
+                'video/webm': '.webm'
+            }
+            file_ext = next((v for k, v in ext_map.items() if k in content_type), '.mp3')
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Неподдерживаемый формат файла. Поддерживаются: {', '.join(allowed_extensions)}"
+            )
+
+        # Сохранение скачанного файла во временную директорию
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
+            temp_audio.write(response.content)
+            temp_audio_path = temp_audio.name
+
+        logger.info(f"Файл успешно скачан: {url}")
+        filename = Path(url.split('?')[0]).name
 
         response = await transcribe_file(temp_audio_path, filename, model_size, format)
 
