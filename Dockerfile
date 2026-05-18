@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование исходного кода
-COPY main.py .
+COPY src ./src
 
 # Создание директории для хранения моделей
 RUN mkdir -p /app/models
@@ -20,4 +20,4 @@ RUN mkdir -p /app/models
 EXPOSE 8000
 
 # Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

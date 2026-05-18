@@ -3,7 +3,7 @@ version: '3.8'
 services:
   whisper-service:
     build: .
-    image: whisper-service:0.0.1
+    image: whisper-service:0.0.2
     container_name: whisper-service
     ports:
       - "8000:8000"
