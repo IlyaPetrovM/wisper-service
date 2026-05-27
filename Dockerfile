@@ -10,8 +10,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копирование исходного кода
+# Копирование исходного кода и статических файлов
 COPY src ./src
+COPY templates ./templates
+COPY static ./static
 
 # Создание директории для хранения моделей
 RUN mkdir -p /app/models
