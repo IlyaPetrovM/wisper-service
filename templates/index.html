@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper Transcription</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Whisper Transcription</h1>
+
+        <form id="transcribeForm">
+            <div class="form-group">
+                <label for="fileInput">Аудио файл</label>
+                <input type="file" id="fileInput" accept="audio/*" class="file-input">
+                <div class="file-label">или перетащите файл сюда</div>
+            </div>
+
+            <div class="form-group">
+                <label for="urlInput">Или укажите URL</label>
+                <input type="url" id="urlInput" placeholder="https://example.com/audio.mp3" class="form-input">
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="modelSelect">Модель</label>
+                    <select id="modelSelect" class="form-input">
+                        <option value="small">Small (быстро)</option>
+                        <option value="medium">Medium (баланс)</option>
+                        <option value="large">Large (точно)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Формат</label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="format" value="srt" checked>
+                            SRT
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="format" value="json">
+                            JSON
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary" id="submitBtn">Расшифровать</button>
+        </form>
+
+        <div id="logs" class="logs hidden">
+            <h3>Статус</h3>
+            <div id="logsList" class="logs-content"></div>
+        </div>
+
+        <div id="result" class="result hidden">
+            <h3>Результат</h3>
+            <textarea id="resultText" class="result-textarea" readonly></textarea>
+            <button id="downloadBtn" class="btn-secondary">Скачать</button>
+        </div>
+
+        <div id="error" class="error hidden">
+            <p id="errorText"></p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('transcribeForm');
+        const fileInput = document.getElementById('fileInput');
+        const urlInput = document.getElementById('urlInput');
+        const modelSelect = document.getElementById('modelSelect');
+        const submitBtn = document.getElementById('submitBtn');
+        const logsDiv = document.getElementById('logs');
+        const logsList = document.getElementById('logsList');
+        const resultDiv = document.getElementById('result');
+        const resultText = document.getElementById('resultText');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const errorDiv = document.getElementById('error');
+        const errorText = document.getElementById('errorText');
+
+        // Drag and drop
+        fileInput.addEventListener('dragover', e => {
+            e.preventDefault();
+            fileInput.classList.add('drag-over');
+        });
+
+        fileInput.addEventListener('dragleave', () => {
+            fileInput.classList.remove('drag-over');
+        });
+
+        fileInput.addEventListener('drop', e => {
+            e.preventDefault();
+            fileInput.classList.remove('drag-over');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                urlInput.value = '';
+            }
+        });
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+
+            if (!fileInput.files.length && !urlInput.value) {
+                showError('Выберите файл или укажите URL');
+                return;
+            }
+
+            const formData = new FormData();
+
+            if (fileInput.files.length) {
+                formData.append('file', fileInput.files[0]);
+            } else if (urlInput.value) {
+                formData.append('url', urlInput.value);
+            }
+
+            formData.append('model_size', modelSelect.value);
+            formData.append('format', document.querySelector('input[name="format"]:checked').value);
+
+            clearUI();
+            showLogs();
+            logsList.innerHTML = '<p>Обработка...</p>';
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                logsList.innerHTML = data.logs.map(log => `<p>${log}</p>`).join('');
+
+                if (data.success) {
+                    resultText.value = data.result;
+                    showResult();
+                    downloadBtn.onclick = () => downloadResult(data.result, data.filename, data.format);
+                } else {
+                    showError(data.error || 'Ошибка обработки');
+                }
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                submitBtn.disabled = false;
+            }
+        });
+
+        function clearUI() {
+            resultDiv.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+            logsList.innerHTML = '';
+        }
+
+        function showLogs() {
+            logsDiv.classList.remove('hidden');
+        }
+
+        function showResult() {
+            resultDiv.classList.remove('hidden');
+        }
+
+        function showError(msg) {
+            errorText.textContent = msg;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function downloadResult(content, filename, format) {
+            const ext = format === 'srt' ? 'srt' : 'jsonl';
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${filename}.${ext}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
