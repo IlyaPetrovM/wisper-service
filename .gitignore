@@ -54,3 +54,5 @@ models/
 
 # Environment variables
 .env
+
+app/models/*

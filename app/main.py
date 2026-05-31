@@ -25,8 +25,8 @@ app = FastAPI(
 )
 
 # Setup templates and static files
-templates_dir = Path(__file__).parent.parent / "templates"
-static_dir = Path(__file__).parent.parent / "static"
+templates_dir = Path(__file__).parent / "templates"
+static_dir = Path(__file__).parent / "static"
 
 templates_dir.mkdir(exist_ok=True)
 static_dir.mkdir(exist_ok=True)
@@ -54,7 +54,7 @@ def load_model(model_size: str) -> WhisperModel:
         model_size,
         device="cpu",
         compute_type="int8",  # Оптимизация для CPU
-        download_root="./models"  # Локальное хранение модели
+        download_root=str(Path(__file__).parent / "models")
     )
 
     logger.info(f"Модель {model_size} загружена успешно")
@@ -63,14 +63,8 @@ def load_model(model_size: str) -> WhisperModel:
 
 @app.on_event("startup")
 async def startup_event():
-    """Загрузка моделей Whisper при старте сервиса"""
-    global models
-
-    # Загружаем только medium модель при старте для экономии памяти
-    # Остальные модели будут загружаться по требованию
-    logger.info("Инициализация сервиса транскрибации...")
-    models[ModelSize.SMALL] = load_model(ModelSize.SMALL)
-    logger.info("Сервис готов к работе")
+    """Инициализация сервиса без предварительной загрузки моделей"""
+    logger.info("Сервис транскрибации инициализирован (модели загружаются по требованию)")
 
 
 def format_timestamp(seconds: float) -> str:
@@ -124,17 +118,10 @@ async def _transcribe_audio(audio_path: str, filename: str, model_size: ModelSiz
         logs = []
 
     if model_size not in models:
-        msg = f"Загрузка модели {model_size}..."
-        logger.info(msg)
-        logs.append(msg)
-        try:
-            models[model_size] = load_model(model_size)
-            logs.append(f"✓ Модель {model_size} загружена")
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ошибка загрузки модели {model_size}: {str(e)}"
-            )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Модель {model_size} не загружена. Используйте POST /api/load_model?model_size={model_size} для загрузки"
+        )
 
     model = models[model_size]
 
@@ -292,6 +279,51 @@ async def transcribe_audio_api(
         if temp_audio_path and os.path.exists(temp_audio_path):
             os.unlink(temp_audio_path)
             logger.info(f"Временный файл удален: {temp_audio_path}")
+
+
+class LoadModelResponse(BaseModel):
+    success: bool
+    message: str
+    model_size: str
+    loaded: bool
+
+
+@app.post("/api/load_model", response_model=LoadModelResponse)
+async def api_load_model(
+    model_size: ModelSize = Query(
+        default=ModelSize.SMALL,
+        description="Размер модели Whisper для загрузки"
+    )
+):
+    """Загрузить модель Whisper"""
+    try:
+        if model_size in models:
+            logger.info(f"Модель {model_size} уже загружена")
+            return LoadModelResponse(
+                success=True,
+                message=f"Модель {model_size} уже загружена",
+                model_size=model_size,
+                loaded=True
+            )
+
+        logger.info(f"Начало загрузки модели {model_size}...")
+        models[model_size] = load_model(model_size)
+
+        return LoadModelResponse(
+            success=True,
+            message=f"✓ Модель {model_size} успешно загружена",
+            model_size=model_size,
+            loaded=True
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке модели {model_size}: {str(e)}")
+        return LoadModelResponse(
+            success=False,
+            message=f"✗ Ошибка загрузки модели: {str(e)}",
+            model_size=model_size,
+            loaded=False
+        )
 
 
 @app.post(

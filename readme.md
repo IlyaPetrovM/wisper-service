@@ -164,3 +164,32 @@ whisper-service/
 - Сервис полностью автономный (оффлайн) после загрузки модели
 - Модель кэшируется в директории `./models` на хосте
 
+# Standalone установка
+
+## 1 Подготовка 
+1. Установить NSIS
+https://nsis.sourceforge.io/Download
+
+2. Скачать в директорию installer/dist ffmpeg и python
+
+3. ffmpeg-8.0.1-essentials_build
+https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.0.1-essentials_build.7z
+
+распаковать из папки bin все exe-файлы в папку ffmpeg
+
+4. python 3.11.8 embeddable
+https://github.com/Nestorchik/embedded_python_3.11.6/archive/refs/heads/main.zip
+
+5. перейти в папку python и установить библиотеки:
+```
+.\python.exe -m pip install -r ..\..\..\requirements.txt
+```
+## 2 Сборка
+
+Перейдите в папку installer
+
+
+Запустите NSIS (замените путь на полный путь к nsis.exe)
+```
+> 'C:\Program Files (x86)\NSIS\makensis.exe' .\installer\whisper-service.nsi
+```
