@@ -15,6 +15,7 @@ COPY app/main.py ./
 COPY app/core.py ./
 COPY app/fastapi_routes.py ./
 COPY app/server.py ./
+COPY app/rabbit_interface.py ./
 COPY app/templates ./templates
 COPY app/static ./static
 
@@ -24,5 +25,8 @@ RUN mkdir -p /app/models
 # Экспонирование порта
 EXPOSE 8000
 
+# Переменная окружения для выбора режима (rabbit_worker или web)
+ENV RABBIT_WORKER=1
+
 # Запуск приложения
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD sh -c 'if [ "$RABBIT_WORKER" = "1" ]; then python main.py --rabbit-worker; else python main.py; fi'

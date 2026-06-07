@@ -1,7 +1,42 @@
+import logging
+import asyncio
+import sys
+import argparse
 from server import create_app
+from rabbit_interface import RabbitInterface
 
-app = create_app()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def run_rabbit_worker():
+    """Запуск RabbitMQ воркера"""
+    try:
+        logger.info("Запуск RabbitMQ воркера...")
+        rabbit = RabbitInterface()
+        rabbit.connect()
+        asyncio.run(rabbit.start_consuming())
+    except KeyboardInterrupt:
+        logger.info("RabbitMQ воркер остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка RabbitMQ воркера: {str(e)}")
+        sys.exit(1)
+
+
+def run_web_server():
+    """Запуск FastAPI веб-сервера"""
+    import uvicorn
+    app = create_app()
+    logger.info("Запуск FastAPI сервера...")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    parser = argparse.ArgumentParser(description="Whisper Transcription Service")
+    parser.add_argument("--rabbit-worker", action="store_true", help="Запуск RabbitMQ воркера")
+    args = parser.parse_args()
+
+    if args.rabbit_worker:
+        run_rabbit_worker()
+    else:
+        run_web_server()

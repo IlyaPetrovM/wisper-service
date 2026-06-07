@@ -52,8 +52,11 @@ pip install -r requirements.txt
 # Linux: apt-get install ffmpeg
 # macOS: brew install ffmpeg
 
-# Запуск сервиса
-uvicorn main:app --host 0.0.0.0 --port 8000
+# Запуск веб-сервера
+python main.py
+
+# Запуск RabbitMQ воркера
+python main.py --rabbit-worker
 ```
 
 ## Использование API
@@ -115,6 +118,132 @@ curl http://localhost:8000/
 
 # Health check
 curl http://localhost:8000/health
+```
+
+## RabbitMQ Интерфейс
+
+Сервис может работать в режиме RabbitMQ воркера для получения команд от мастер-узла.
+
+### Запуск RabbitMQ воркера
+
+```bash
+# Локально
+python main.py --rabbit-worker
+
+# В Docker
+docker run -e RABBIT_WORKER=1 whisper-service
+
+# Через Docker Compose
+docker-compose -f docker-compose.yml run -e RABBIT_WORKER=1 whisper-service
+```
+
+### Формат входящих сообщений (очередь `whisper_in`)
+
+#### Транскрибирование по URL
+
+```json
+{
+  "command": "transcribe",
+  "model_size": "small",
+  "format": "srt",
+  "file_url": "https://example.com/audio.mp3",
+  "correlation_id": "request-123"
+}
+```
+
+#### Загрузка модели
+
+```json
+{
+  "command": "load_model",
+  "model_size": "medium",
+  "correlation_id": "model-load-456"
+}
+```
+
+**Параметры:**
+- `command`: `"transcribe"` или `"load_model"`
+- `model_size`: `"small"`, `"medium"` или `"large"`
+- `format`: `"srt"` или `"json"` (только для transcribe)
+- `file_url`: URL аудио файла (только для transcribe)
+- `correlation_id`: уникальный ID для связи запроса и ответа
+
+### Формат исходящих сообщений (очередь `whisper_out`)
+
+#### Успешное транскрибирование
+
+```json
+{
+  "correlation_id": "request-123",
+  "status": "success",
+  "result": "1\n00:00:00,000 --> 00:00:05,000\nТекст транскрипции\n",
+  "logs": ["Файл загружен", "Язык: ru (100%)", "Готово: 10 сегментов"],
+  "file_url": "https://example.com/audio.mp3",
+  "filename": "audio"
+}
+```
+
+#### Успешная загрузка модели
+
+```json
+{
+  "correlation_id": "model-load-456",
+  "status": "success",
+  "message": "✓ Модель medium успешно загружена",
+  "model_size": "medium",
+  "loaded": true
+}
+```
+
+#### Ошибка
+
+```json
+{
+  "correlation_id": "request-123",
+  "status": "error",
+  "logs": ["Файл загружен"],
+  "file_url": "https://example.com/audio.mp3",
+  "error": "Модель small не загружена. Загрузите её перед использованием"
+}
+```
+
+### Примеры отправки сообщений
+
+```python
+import pika
+import json
+
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# Загрузка модели
+message = {
+    "command": "load_model",
+    "model_size": "small",
+    "correlation_id": "model-1"
+}
+channel.basic_publish(exchange='', routing_key='whisper_in', body=json.dumps(message))
+
+# Транскрибирование
+message = {
+    "command": "transcribe",
+    "model_size": "small",
+    "format": "srt",
+    "file_url": "https://example.com/audio.mp3",
+    "correlation_id": "transcribe-1"
+}
+channel.basic_publish(exchange='', routing_key='whisper_in', body=json.dumps(message))
+
+# Получение результата
+def callback(ch, method, properties, body):
+    response = json.loads(body)
+    print(f"Результат: {response['status']}")
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+channel.basic_consume(queue='whisper_out', on_message_callback=callback)
+channel.start_consuming()
+
+connection.close()
 ```
 
 ## API Endpoints
