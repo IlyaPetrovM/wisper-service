@@ -22,9 +22,13 @@ htmlcov/
 *.log
 .DS_Store
 models/
+app/models/
+app/input/
+app/output/
 *.srt
 *.mp3
 *.wav
 *.m4a
 readme.md
 input/*
+installer/
