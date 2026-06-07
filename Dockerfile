@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Копирование исходного кода и статических файлов
 COPY app/main.py ./
+COPY app/core.py ./
+COPY app/fastapi_routes.py ./
+COPY app/server.py ./
 COPY app/templates ./templates
 COPY app/static ./static
 
