@@ -1,7 +1,7 @@
 services:
   whisper-service:
     build: .
-    image: whisper-service:0.0.3
+    image: whisper-service:0.0.4
     container_name: whisper-service
     ports:
       - "8000:8000"

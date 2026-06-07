@@ -64,6 +64,23 @@
         <div id="error" class="error hidden">
             <p id="errorText"></p>
         </div>
+
+        <div id="modelDialog" class="modal hidden">
+            <div class="modal-content">
+                <h2 id="modelDialogTitle">Загрузить модель?</h2>
+                <p id="modelDialogMessage"></p>
+                <div class="modal-buttons">
+                    <button id="loadBtn" class="btn-primary">Загрузить</button>
+                    <button id="cancelBtn" class="btn-secondary" autofocus>Нет</button>
+                </div>
+                <div id="loadingProgress" class="loading-progress hidden">
+                    <p id="loadingText">Загрузка модели...</p>
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -79,6 +96,22 @@
         const downloadBtn = document.getElementById('downloadBtn');
         const errorDiv = document.getElementById('error');
         const errorText = document.getElementById('errorText');
+        const modelDialog = document.getElementById('modelDialog');
+        const modelDialogTitle = document.getElementById('modelDialogTitle');
+        const modelDialogMessage = document.getElementById('modelDialogMessage');
+        const loadBtn = document.getElementById('loadBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const loadingProgress = document.getElementById('loadingProgress');
+        const loadingText = document.getElementById('loadingText');
+        const progressFill = document.getElementById('progressFill');
+
+        const modelSizes = {
+            'small': { name: 'Small (быстро)', size: '928 МБ' },
+            'medium': { name: 'Medium (баланс)', size: '1.5 ГБ' },
+            'large': { name: 'Large (точно)', size: '2.9 ГБ' }
+        };
+
+        let pendingTranscribeData = null;
 
         // Drag and drop
         fileInput.addEventListener('dragover', e => {
@@ -137,6 +170,9 @@
                     resultText.value = data.result;
                     showResult();
                     downloadBtn.onclick = () => downloadResult(data.result, data.filename, data.format);
+                } else if (data.error && data.error.includes('не загружена')) {
+                    pendingTranscribeData = formData;
+                    showModelDialog(modelSelect.value);
                 } else {
                     showError(data.error || 'Ошибка обработки');
                 }
@@ -176,6 +212,64 @@
             a.click();
             URL.revokeObjectURL(url);
         }
+
+        function showModelDialog(modelSize) {
+            const modelInfo = modelSizes[modelSize];
+            modelDialogTitle.textContent = `${modelInfo.name} не загружена`;
+            modelDialogMessage.innerHTML = `Модель не загружена - загрузить?<br><small>Размер: ${modelInfo.size}</small>`;
+            modelDialog.classList.remove('hidden');
+            cancelBtn.focus();
+        }
+
+        function hideModelDialog() {
+            modelDialog.classList.add('hidden');
+            loadingProgress.classList.add('hidden');
+            progressFill.style.width = '0%';
+        }
+
+        async function loadModel(modelSize) {
+            loadBtn.disabled = true;
+            cancelBtn.disabled = true;
+            loadingProgress.classList.remove('hidden');
+
+            try {
+                loadingText.textContent = `Загрузка модели ${modelSizes[modelSize].name}...`;
+
+                const response = await fetch(`/api/load_model?model_size=${modelSize}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    loadingText.textContent = '✓ Модель загружена успешно';
+                    progressFill.style.width = '100%';
+                    setTimeout(() => {
+                        hideModelDialog();
+                        logsList.innerHTML += '<p>✓ Модель загружена. Нажмите "Расшифровать" еще раз</p>';
+                    }, 1000);
+                } else {
+                    showError(`Ошибка загрузки модели: ${data.message}`);
+                    hideModelDialog();
+                }
+            } catch (err) {
+                showError(`Ошибка загрузки: ${err.message}`);
+                hideModelDialog();
+            } finally {
+                loadBtn.disabled = false;
+                cancelBtn.disabled = false;
+            }
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            hideModelDialog();
+            clearUI();
+        });
+
+        loadBtn.addEventListener('click', () => {
+            const modelSize = modelSelect.value;
+            loadModel(modelSize);
+        });
     </script>
 </body>
 </html>
