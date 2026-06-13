@@ -83,61 +83,66 @@ class RabbitInterface:
             if not is_model_loaded(model_size):
                 raise ValueError(f"Модель {model_size} не загружена. Загрузите её перед использованием")
 
-            result_content, info, filename = await download_and_transcribe(
+            result, info, filename = await download_and_transcribe(
                 file_url, model_size, format_type, logs
             )
 
             return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id,
                 "correlation_id": correlation_id,
                 "status": "success",
-                "result": result_content,
-                "logs": logs,
                 "file_url": file_url,
                 "filename": filename,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "worker_id": self.worker_id
+                "result": result
             }
         except Exception as e:
             logger.error(f"Ошибка при транскрибировании: {str(e)}")
             return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id,
                 "correlation_id": correlation_id,
                 "status": "error",
-                "logs": logs,
                 "file_url": file_url,
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "worker_id": self.worker_id
+                "logs": logs,
             }
 
     def handle_load_model(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Обработка команды загрузки модели"""
         correlation_id = message.get("correlation_id")
         model_size = message.get("model_size")
+        model_url = message.get("model_url")
 
         try:
             if not model_size:
                 raise ValueError("Не указан model_size")
 
-            success, load_message = load_model_sync(model_size)
+            if model_url:
+                logger.info(f"Загрузка модели {model_size} с кастомного URL: {model_url}")
+
+            success, load_message = load_model_sync(model_size, model_url=model_url)
 
             return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id,
                 "correlation_id": correlation_id,
                 "status": "success" if success else "error",
                 "message": load_message,
                 "model_size": model_size,
-                "loaded": is_model_loaded(model_size),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "worker_id": self.worker_id
+                "model_url": model_url,
+                "loaded": is_model_loaded(model_size)
             }
         except Exception as e:
             logger.error(f"Ошибка при загрузке модели: {str(e)}")
             return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id,
                 "correlation_id": correlation_id,
                 "status": "error",
                 "model_size": model_size,
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "worker_id": self.worker_id
+                "model_url": model_url,
+                "error": str(e)
             }
 
     def process_message(self, message_body: bytes) -> Dict[str, Any]:

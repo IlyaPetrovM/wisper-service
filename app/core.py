@@ -1,9 +1,9 @@
 import os
-import json
 import tempfile
 import logging
+import hashlib
 from pathlib import Path
-from typing import Dict, Generator, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from enum import Enum
 from faster_whisper import WhisperModel
 import requests
@@ -21,15 +21,81 @@ class ModelSize(str, Enum):
 models: Dict[str, WhisperModel] = {}
 
 
-def load_model(model_size: str) -> WhisperModel:
-    """Загрузка конкретной модели Whisper"""
+def _download_model_from_url(url: str, model_size: str, cache_dir: Path) -> bool:
+    """Скачать модель с кастомного URL и сохранить в кэш"""
+    logger.info(f"Начало скачивания модели {model_size} с URL: {url}")
+
+    try:
+        response = requests.get(url, timeout=600, stream=True)
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        logger.info(f"Размер модели: {total_size / 1024 / 1024:.2f} MB")
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        model_path = cache_dir / f"{model_size}.tar.gz"
+
+        downloaded = 0
+        with open(model_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        logger.info(f"Прогресс: {progress:.1f}% ({downloaded / 1024 / 1024:.2f} / {total_size / 1024 / 1024:.2f} MB)")
+
+        logger.info(f"Модель {model_size} успешно скачана: {model_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании модели с {url}: {str(e)}")
+        return False
+
+
+def _get_model_cache_path(model_size: str, cache_dir: Path) -> Optional[Path]:
+    """Проверить наличие модели в локальном кэше"""
+    cache_dir = Path(cache_dir) / model_size
+
+    if cache_dir.exists():
+        logger.info(f"Модель {model_size} найдена в кэше: {cache_dir}")
+        return cache_dir
+
+    logger.info(f"Модель {model_size} не найдена в кэше: {cache_dir}")
+    return None
+
+
+def load_model(model_size: str, model_url: Optional[str] = None) -> WhisperModel:
+    """
+    Загрузка конкретной модели Whisper.
+
+    Args:
+        model_size: размер модели (small, medium, large)
+        model_url: опциональный URL для скачивания модели (например, с локального сервера)
+    """
     logger.info(f"Загрузка модели Whisper ({model_size})...")
+
+    models_dir = Path(__file__).parent / "models"
+
+    # Проверяем локальный кэш
+    cached_model = _get_model_cache_path(model_size, models_dir)
+
+    # Если модель не в кэше и указан URL, скачиваем
+    if not cached_model and model_url:
+        logger.info(f"Попытка скачать модель с {model_url}")
+        _download_model_from_url(model_url, model_size, models_dir)
+        cached_model = _get_model_cache_path(model_size, models_dir)
+
+        if cached_model:
+            logger.info(f"Модель успешно скачана из {model_url}")
+        else:
+            logger.warning(f"Не удалось скачать модель с {model_url}, будет использована стандартная загрузка")
 
     model = WhisperModel(
         model_size,
         device="cpu",
         compute_type="int8",
-        download_root=str(Path(__file__).parent / "models")
+        download_root=str(models_dir)
     )
 
     logger.info(f"Модель {model_size} загружена успешно")
@@ -41,8 +107,14 @@ def is_model_loaded(model_size: str) -> bool:
     return model_size in models
 
 
-def load_model_sync(model_size: str) -> Tuple[bool, str]:
-    """Загрузить модель синхронно. Возвращает (успех, сообщение)"""
+def load_model_sync(model_size: str, model_url: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Загрузить модель синхронно. Возвращает (успех, сообщение)
+
+    Args:
+        model_size: размер модели
+        model_url: опциональный URL для скачивания модели из локальной сети или другого источника
+    """
     try:
         if is_model_loaded(model_size):
             msg = f"Модель {model_size} уже загружена"
@@ -50,7 +122,7 @@ def load_model_sync(model_size: str) -> Tuple[bool, str]:
             return True, msg
 
         logger.info(f"Начало загрузки модели {model_size}...")
-        models[model_size] = load_model(model_size)
+        models[model_size] = load_model(model_size, model_url=model_url)
         msg = f"Модель {model_size} успешно загружена"
         return True, msg
 
@@ -96,26 +168,7 @@ def generate_srt(segments) -> str:
     return "\n".join(srt_content)
 
 
-def json_lines_generator(filename: str, segments, info) -> Generator[str, None, None]:
-    """Генерирование JSON Lines из сегментов транскрипции"""
-    for segment in segments:
-        message = {
-            "filename": filename,
-            "id": segment.id,
-            "start": segment.start,
-            "end": segment.end,
-            "text": segment.text,
-            "avg_logprob": segment.avg_logprob,
-            "compression_ratio": segment.compression_ratio,
-            "no_speech_prob": segment.no_speech_prob,
-            "language": info.language,
-            "language_probability": info.language_probability,
-            "duration": info.duration
-        }
-        yield json.dumps(message, ensure_ascii=False) + "\n"
-
-
-async def transcribe_audio_core(audio_path: str, filename: str, model_size: str, format: str, logs: List[str] = None) -> Tuple[str, object]:
+async def transcribe_audio_core(audio_path: str, filename: str, model_size: str, format: str, logs: List[str] = None) -> Tuple:
     """Транскрибирование аудио. Возвращает (контент, инфо)"""
     if logs is None:
         logs = []
@@ -149,7 +202,18 @@ async def transcribe_audio_core(audio_path: str, filename: str, model_size: str,
     if format == "srt":
         content = generate_srt(segments_list)
     else:
-        content = "".join(json_lines_generator(filename, segments_list, info))
+        content = [
+            {
+                "id": segment.id,
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text,
+                "avg_logprob": round(segment.avg_logprob, 2),
+                "compression_ratio": round(segment.compression_ratio, 2),
+                "no_speech_prob": round(segment.no_speech_prob, 2)
+            }
+            for segment in segments_list
+        ]
 
     return content, info
 
