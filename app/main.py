@@ -1,5 +1,4 @@
 import logging
-import asyncio
 import sys
 import argparse
 from server import create_app
@@ -15,7 +14,7 @@ def run_rabbit_worker():
         logger.info("Запуск RabbitMQ воркера...")
         rabbit = RabbitInterface()
         rabbit.connect()
-        asyncio.run(rabbit.start_consuming())
+        rabbit.start_consuming()
     except KeyboardInterrupt:
         logger.info("RabbitMQ воркер остановлен")
     except Exception as e:

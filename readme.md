@@ -139,6 +139,16 @@ docker-compose -f docker-compose.yml run -e RABBIT_WORKER=1 whisper-service
 
 ### Формат входящих сообщений (очередь `whisper_in`)
 
+#### Загрузка модели
+
+```json
+{
+  "command": "load_model",
+  "model_size": "small",
+  "correlation_id": "model-load-456"
+}
+```
+
 #### Транскрибирование по URL
 
 ```json
@@ -146,18 +156,8 @@ docker-compose -f docker-compose.yml run -e RABBIT_WORKER=1 whisper-service
   "command": "transcribe",
   "model_size": "small",
   "format": "srt",
-  "file_url": "https://example.com/audio.mp3",
-  "correlation_id": "request-123"
-}
-```
-
-#### Загрузка модели
-
-```json
-{
-  "command": "load_model",
-  "model_size": "medium",
-  "correlation_id": "model-load-456"
+  "file_url": "http://10.254.212.179:3001/api/files/audio_short.mp3",
+  "correlation_id": "request-PPPP"
 }
 ```
 
@@ -168,83 +168,17 @@ docker-compose -f docker-compose.yml run -e RABBIT_WORKER=1 whisper-service
 - `file_url`: URL аудио файла (только для transcribe)
 - `correlation_id`: уникальный ID для связи запроса и ответа
 
-### Формат исходящих сообщений (очередь `whisper_out`)
-
-#### Успешное транскрибирование
-
-```json
-{
-  "correlation_id": "request-123",
-  "status": "success",
-  "result": "1\n00:00:00,000 --> 00:00:05,000\nТекст транскрипции\n",
-  "logs": ["Файл загружен", "Язык: ru (100%)", "Готово: 10 сегментов"],
-  "file_url": "https://example.com/audio.mp3",
-  "filename": "audio"
-}
-```
-
-#### Успешная загрузка модели
-
-```json
-{
-  "correlation_id": "model-load-456",
-  "status": "success",
-  "message": "✓ Модель medium успешно загружена",
-  "model_size": "medium",
-  "loaded": true
-}
-```
-
-#### Ошибка
-
-```json
-{
-  "correlation_id": "request-123",
-  "status": "error",
-  "logs": ["Файл загружен"],
-  "file_url": "https://example.com/audio.mp3",
-  "error": "Модель small не загружена. Загрузите её перед использованием"
-}
-```
 
 ### Примеры отправки сообщений
 
-```python
-import pika
-import json
-
-connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-channel = connection.channel()
-
-# Загрузка модели
-message = {
-    "command": "load_model",
-    "model_size": "small",
-    "correlation_id": "model-1"
-}
-channel.basic_publish(exchange='', routing_key='whisper_in', body=json.dumps(message))
-
-# Транскрибирование
-message = {
-    "command": "transcribe",
-    "model_size": "small",
-    "format": "srt",
-    "file_url": "https://example.com/audio.mp3",
-    "correlation_id": "transcribe-1"
-}
-channel.basic_publish(exchange='', routing_key='whisper_in', body=json.dumps(message))
-
-# Получение результата
-def callback(ch, method, properties, body):
-    response = json.loads(body)
-    print(f"Результат: {response['status']}")
-    ch.basic_ack(delivery_tag=method.delivery_tag)
-
-channel.basic_consume(queue='whisper_out', on_message_callback=callback)
-channel.start_consuming()
-
-connection.close()
+Загрузка модели
 ```
+{"command": "load_model", "correlation_id": "ec3c77b4-f85d-4eef-afeb-42d5f396b3cf", "model_size": "small"}
+```
+
+
+
+
 
 ## API Endpoints
 
@@ -322,3 +256,5 @@ https://github.com/Nestorchik/embedded_python_3.11.6/archive/refs/heads/main.zip
 ```
 > 'C:\Program Files (x86)\NSIS\makensis.exe' .\installer\whisper-service.nsi
 ```
+
+

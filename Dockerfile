@@ -18,6 +18,8 @@ COPY app/server.py ./
 COPY app/rabbit_interface.py ./
 COPY app/templates ./templates
 COPY app/static ./static
+COPY app/config.py ./
+COPY app/config.yaml ./
 
 # Создание директории для хранения моделей
 RUN mkdir -p /app/models

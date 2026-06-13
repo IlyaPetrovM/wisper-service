@@ -51,11 +51,11 @@ def load_model_sync(model_size: str) -> Tuple[bool, str]:
 
         logger.info(f"Начало загрузки модели {model_size}...")
         models[model_size] = load_model(model_size)
-        msg = f"✓ Модель {model_size} успешно загружена"
+        msg = f"Модель {model_size} успешно загружена"
         return True, msg
 
     except Exception as e:
-        msg = f"✗ Ошибка загрузки модели: {str(e)}"
+        msg = f"Ошибка загрузки модели: {str(e)}"
         logger.error(f"Ошибка при загрузке модели {model_size}: {str(e)}")
         return False, msg
 
@@ -138,11 +138,11 @@ async def transcribe_audio_core(audio_path: str, filename: str, model_size: str,
 
     segments_list = list(segments)
 
-    msg = f"✓ Язык: {info.language} ({info.language_probability:.0%})"
+    msg = f"Язык: {info.language} ({info.language_probability:.0%})"
     logger.info(msg)
     logs.append(msg)
 
-    msg = f"✓ Готово: {len(segments_list)} сегментов"
+    msg = f"Готово: {len(segments_list)} сегментов"
     logger.info(msg)
     logs.append(msg)
 
@@ -189,15 +189,17 @@ async def process_audio_file(audio_content: bytes, filename: str, model_size: st
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
         temp_audio.write(audio_content)
+        temp_audio.flush()
+        os.fsync(temp_audio.fileno())
         temp_audio_path = temp_audio.name
 
-    try:
-        content, info = await transcribe_audio_core(temp_audio_path, filename, model_size, format, logs)
-        return content, info
-    finally:
-        if os.path.exists(temp_audio_path):
-            os.unlink(temp_audio_path)
-            logger.info(f"Временный файл удален: {temp_audio_path}")
+    content, info = await transcribe_audio_core(temp_audio_path, filename, model_size, format, logs)
+
+    if os.path.exists(temp_audio_path):
+        os.unlink(temp_audio_path)
+        logger.info(f"Временный файл удален: {temp_audio_path}")
+
+    return content, info
 
 
 async def download_and_transcribe(url: str, model_size: str, format: str, logs: List[str] = None) -> Tuple[str, object, str]:
@@ -209,7 +211,30 @@ async def download_and_transcribe(url: str, model_size: str, format: str, logs: 
     logger.info(f"Начало скачивания файла: {url}")
 
     response = requests.get(url, timeout=300)
+    logger.info(f"HTTP статус: {response.status_code}")
+    logger.info(f"Заголовки ответа: {dict(response.headers)}")
+
     response.raise_for_status()
+
+    content_size = len(response.content)
+    logger.info(f"Размер скачанного контента: {content_size} байт ({content_size / 1024 / 1024:.2f} MB)")
+
+    if content_size == 0:
+        raise ValueError("Скачанный файл пуст (размер 0 байт)")
+
+    # Проверка Content-Type
+    content_type = response.headers.get('content-type', '').lower()
+    logger.info(f"Content-Type из заголовков: {content_type}")
+
+    if 'text/html' in content_type:
+        raise ValueError(f"Сервер вернул HTML вместо аудиофайла. Content-Type: {content_type}. Проверьте URL: {url}")
+
+    if content_type and 'audio' not in content_type:
+        logger.warning(f"Content-Type не указывает на аудиофайл: {content_type}")
+
+    # Проверка минимального размера (аудиофайлы обычно больше 10KB)
+    if content_size < 10240:
+        raise ValueError(f"Размер файла слишком маленький ({content_size} байт). Скачан может быть не аудиофайл.")
 
     parsed_url = Path(url.split('?')[0])
     file_ext = parsed_url.suffix.lower()
@@ -217,22 +242,46 @@ async def download_and_transcribe(url: str, model_size: str, format: str, logs: 
     if not file_ext:
         content_type = response.headers.get('content-type', '')
         file_ext = get_file_extension_from_content_type(content_type)
+        logger.info(f"Расширение определено по Content-Type: {file_ext}")
+    else:
+        logger.info(f"Расширение из URL: {file_ext}")
 
     filename = Path(url.split('?')[0]).name
-    logs.append(f"✓ Файл загружен ({len(response.content) / 1024 / 1024:.1f} MB)")
+    logs.append(f"✓ Файл загружен ({content_size / 1024 / 1024:.2f} MB)")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_audio:
-        temp_audio.write(response.content)
-        temp_audio_path = temp_audio.name
+        bytes_written = temp_audio.write(response.content)
+        logger.info(f"Записано в файл: {bytes_written} байт")
 
-    try:
-        logger.info(f"Файл успешно скачан: {url}")
-        content, info = await transcribe_audio_core(temp_audio_path, filename, model_size, format, logs)
-        return content, info, filename
-    finally:
-        if os.path.exists(temp_audio_path):
-            os.unlink(temp_audio_path)
-            logger.info(f"Временный файл удален: {temp_audio_path}")
+        if bytes_written != content_size:
+            raise ValueError(f"Ошибка записи: записано {bytes_written} из {content_size} байт")
+
+        temp_audio.flush()
+        logger.info(f"Буфер зафлушен")
+
+        os.fsync(temp_audio.fileno())
+        logger.info(f"Данные синхронизированы с диском")
+
+        temp_audio_path = temp_audio.name
+        logger.info(f"Временный файл создан: {temp_audio_path}")
+
+    # Проверка файла на диске
+    if os.path.exists(temp_audio_path):
+        file_size_on_disk = os.path.getsize(temp_audio_path)
+        logger.info(f"Размер файла на диске: {file_size_on_disk} байт")
+        if file_size_on_disk == 0:
+            raise ValueError(f"Файл на диске пуст: {temp_audio_path}")
+    else:
+        raise ValueError(f"Временный файл не найден после создания: {temp_audio_path}")
+
+    logger.info(f"Файл успешно скачан и подготовлен: {url}")
+    content, info = await transcribe_audio_core(temp_audio_path, filename, model_size, format, logs)
+
+    if os.path.exists(temp_audio_path):
+        os.unlink(temp_audio_path)
+        logger.info(f"Временный файл удален: {temp_audio_path}")
+
+    return content, info, filename
 
 
 def get_service_info() -> dict:

@@ -2,6 +2,8 @@ import json
 import logging
 import asyncio
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import pika
 from pika.adapters.blocking_connection import BlockingChannel
 
@@ -11,12 +13,13 @@ from core import (
     is_model_loaded,
     download_and_transcribe
 )
+from config import get_worker_name
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # RabbitMQ конфигурация
-RABBIT_HOST = "10.33.222.179"
+RABBIT_HOST = "10.254.212.179"
 RABBIT_PORT = 5672
 RABBIT_USER = "guest"
 RABBIT_PASSWORD = "guest"
@@ -30,6 +33,9 @@ class RabbitInterface:
     def __init__(self):
         self.connection = None
         self.channel = None
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.worker_id = get_worker_name()
+        logger.info(f"Worker_id: {self.worker_id}")
 
     def connect(self):
         """Подключение к RabbitMQ"""
@@ -42,13 +48,14 @@ class RabbitInterface:
         )
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
-        logger.info("Подключено к RabbitMQ")
+        logger.info(f"Подключено к RabbitMQ")
 
     def close(self):
         """Закрытие соединения"""
         if self.connection and not self.connection.is_closed:
             self.connection.close()
             logger.info("Соединение закрыто")
+        self.executor.shutdown(wait=True)
 
     def send_response(self, response: Dict[str, Any]):
         """Отправка ответа в очередь whisper_out"""
@@ -86,7 +93,9 @@ class RabbitInterface:
                 "result": result_content,
                 "logs": logs,
                 "file_url": file_url,
-                "filename": filename
+                "filename": filename,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id
             }
         except Exception as e:
             logger.error(f"Ошибка при транскрибировании: {str(e)}")
@@ -95,7 +104,9 @@ class RabbitInterface:
                 "status": "error",
                 "logs": logs,
                 "file_url": file_url,
-                "error": str(e)
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id
             }
 
     def handle_load_model(self, message: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,7 +125,9 @@ class RabbitInterface:
                 "status": "success" if success else "error",
                 "message": load_message,
                 "model_size": model_size,
-                "loaded": is_model_loaded(model_size)
+                "loaded": is_model_loaded(model_size),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id
             }
         except Exception as e:
             logger.error(f"Ошибка при загрузке модели: {str(e)}")
@@ -122,7 +135,9 @@ class RabbitInterface:
                 "correlation_id": correlation_id,
                 "status": "error",
                 "model_size": model_size,
-                "error": str(e)
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "worker_id": self.worker_id
             }
 
     def process_message(self, message_body: bytes) -> Dict[str, Any]:
@@ -145,7 +160,16 @@ class RabbitInterface:
             logger.error(f"Ошибка обработки сообщения: {str(e)}")
             return None
 
-    async def start_consuming(self):
+    def _run_async_in_thread(self, coro):
+        """Запуск async функции в отдельном потоке с собственным event loop"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    def start_consuming(self):
         """Запуск обработки сообщений из очереди"""
         def callback(ch: BlockingChannel, method, properties, body):
             logger.info(f"Сообщение получено из {QUEUE_IN}")
@@ -162,9 +186,10 @@ class RabbitInterface:
                     response = self.handle_load_model(message)
                     self.send_response(response)
                 elif command == "transcribe":
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    response = loop.run_until_complete(self.handle_transcribe(message))
+                    response = self.executor.submit(
+                        self._run_async_in_thread,
+                        self.handle_transcribe(message)
+                    ).result()
                     self.send_response(response)
 
                 ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -185,7 +210,7 @@ def main():
 
     try:
         rabbit.connect()
-        asyncio.run(rabbit.start_consuming())
+        rabbit.start_consuming()
     except KeyboardInterrupt:
         logger.info("Завершение работы...")
     except Exception as e:
