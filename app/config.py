@@ -1,5 +1,6 @@
 import yaml
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ def load_config():
 
 
 def get_worker_name():
+    worker_name = os.getenv("WORKER_NAME")
+    if worker_name:
+        return worker_name
+
     config = load_config()
-    worker_name = config.get("worker", {}).get("name", "Bobby")
-    return worker_name
+    return config.get("worker", {}).get("name", "Bobby")

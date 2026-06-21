@@ -1,7 +1,7 @@
 services:
   whisper-service:
     build: .
-    image: whisper-service:0.1.0
+    image: whisper-service:0.2.0
     container_name: whisper-service
     ports:
       - "8000:8000"
@@ -10,4 +10,15 @@ services:
       - ./app/models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
+      # RabbitMQ конфигурация
+      - RABBIT_HOST=172.30.16.1
+      - RABBIT_PORT=5672
+      - RABBIT_USER=guest
+      - RABBIT_PASSWORD=guest
+      - RABBIT_HEARTBEAT=600
+      # Названия очередей
+      - QUEUE_IN=wisper_in
+      - QUEUE_OUT=wisper_out
+      # Имя воркера
+      - WORKER_NAME=wisper-1
     restart: unless-stopped

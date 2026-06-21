@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+import os
 from typing import Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -18,15 +19,15 @@ from config import get_worker_name
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# RabbitMQ конфигурация
-RABBIT_HOST = "10.254.212.179"
-RABBIT_PORT = 5672
-RABBIT_USER = "guest"
-RABBIT_PASSWORD = "guest"
-RABBIT_HEARTBEAT = 600
+# RabbitMQ конфигурация из переменных окружения
+RABBIT_HOST = os.getenv("RABBIT_HOST", "172.30.16.1")
+RABBIT_PORT = int(os.getenv("RABBIT_PORT", "5672"))
+RABBIT_USER = os.getenv("RABBIT_USER", "guest")
+RABBIT_PASSWORD = os.getenv("RABBIT_PASSWORD", "guest")
+RABBIT_HEARTBEAT = int(os.getenv("RABBIT_HEARTBEAT", "600"))
 
-QUEUE_IN = "whisper_in"
-QUEUE_OUT = "whisper_out"
+QUEUE_IN = os.getenv("QUEUE_IN", "whisper_in")
+QUEUE_OUT = os.getenv("QUEUE_OUT", "whisper_out")
 
 
 class RabbitInterface:
@@ -50,6 +51,11 @@ class RabbitInterface:
         self.channel = self.connection.channel()
         logger.info(f"Подключено к RabbitMQ")
 
+        # Создание очередей если их нет
+        self.channel.queue_declare(queue=QUEUE_IN, durable=True)
+        self.channel.queue_declare(queue=QUEUE_OUT, durable=True)
+        logger.info(f"Очереди проверены: {QUEUE_IN}, {QUEUE_OUT}")
+
     def close(self):
         """Закрытие соединения"""
         if self.connection and not self.connection.is_closed:
@@ -71,6 +77,7 @@ class RabbitInterface:
     async def handle_transcribe(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Обработка команды транскрибирования"""
         logs = []
+        task_id = message.get("task_id")
         correlation_id = message.get("correlation_id")
         file_url = message.get("file_url")
         model_size = message.get("model_size", "small")
@@ -90,6 +97,7 @@ class RabbitInterface:
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "worker_id": self.worker_id,
+                "task_id": task_id,
                 "correlation_id": correlation_id,
                 "status": "success",
                 "file_url": file_url,
@@ -101,6 +109,7 @@ class RabbitInterface:
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "worker_id": self.worker_id,
+                "task_id": task_id,
                 "correlation_id": correlation_id,
                 "status": "error",
                 "file_url": file_url,
