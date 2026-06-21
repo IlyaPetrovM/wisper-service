@@ -119,6 +119,7 @@ class RabbitInterface:
 
     def handle_load_model(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Обработка команды загрузки модели"""
+        task_id = message.get("task_id")
         correlation_id = message.get("correlation_id")
         model_size = message.get("model_size")
         model_url = message.get("model_url")
@@ -135,6 +136,7 @@ class RabbitInterface:
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "worker_id": self.worker_id,
+                "task_id": task_id,
                 "correlation_id": correlation_id,
                 "status": "success" if success else "error",
                 "message": load_message,
@@ -147,6 +149,7 @@ class RabbitInterface:
             return {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "worker_id": self.worker_id,
+                "task_id": task_id,
                 "correlation_id": correlation_id,
                 "status": "error",
                 "model_size": model_size,
