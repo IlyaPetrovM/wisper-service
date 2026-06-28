@@ -1,2 +1,7 @@
 worker:
   name: Bobby
+
+# Устройство инференса: cpu или cuda. Переопределяется env DEVICE или флагом --device.
+device: cpu
+# Тип вычислений faster-whisper (int8 работает и на CPU, и на CUDA).
+compute_type: int8

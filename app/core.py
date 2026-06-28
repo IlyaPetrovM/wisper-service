@@ -8,6 +8,8 @@ from enum import Enum
 from faster_whisper import WhisperModel
 import requests
 
+from config import get_device, get_compute_type
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ class ModelSize(str, Enum):
     SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large"
+    LARGE_RUS = 'bzikst/faster-whisper-large-v3-russian-int8'
 
 
 models: Dict[str, WhisperModel] = {}
@@ -65,15 +68,27 @@ def _get_model_cache_path(model_size: str, cache_dir: Path) -> Optional[Path]:
     return None
 
 
-def load_model(model_size: str, model_url: Optional[str] = None) -> WhisperModel:
+def load_model(
+    model_size: str,
+    model_url: Optional[str] = None,
+    device: Optional[str] = None,
+    compute_type: Optional[str] = None,
+) -> WhisperModel:
     """
     Загрузка конкретной модели Whisper.
 
     Args:
         model_size: размер модели (small, medium, large)
         model_url: опциональный URL для скачивания модели (например, с локального сервера)
+        device: устройство инференса (cuda/cpu); по умолчанию из конфигурации
+        compute_type: тип вычислений faster-whisper; по умолчанию из конфигурации
     """
-    logger.info(f"Загрузка модели Whisper ({model_size})...")
+    if device is None:
+        device = get_device()
+    if compute_type is None:
+        compute_type = get_compute_type()
+
+    logger.info(f"Загрузка модели Whisper ({model_size}) на устройстве {device} (compute_type={compute_type})...")
 
     models_dir = Path(__file__).parent / "models"
 
@@ -93,8 +108,8 @@ def load_model(model_size: str, model_url: Optional[str] = None) -> WhisperModel
 
     model = WhisperModel(
         model_size,
-        device="cpu",
-        compute_type="int8",
+        device=device,
+        compute_type=compute_type,
         download_root=str(models_dir)
     )
 

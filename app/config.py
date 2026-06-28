@@ -28,3 +28,19 @@ def get_worker_name():
 
     config = load_config()
     return config.get("worker", {}).get("name", "Bobby")
+
+
+def get_device():
+    """Устройство для инференса: cuda или cpu. ENV DEVICE → config.yaml → cpu."""
+    device = os.getenv("DEVICE")
+    if not device:
+        device = load_config().get("device", "cpu")
+    return device.strip().lower()
+
+
+def get_compute_type():
+    """Тип вычислений faster-whisper. ENV COMPUTE_TYPE → config.yaml → int8."""
+    compute_type = os.getenv("COMPUTE_TYPE")
+    if not compute_type:
+        compute_type = load_config().get("compute_type", "int8")
+    return compute_type.strip()

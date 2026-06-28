@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 import argparse
 from server import create_app
@@ -33,7 +34,17 @@ def run_web_server():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Whisper Transcription Service")
     parser.add_argument("--rabbit-worker", action="store_true", help="Запуск RabbitMQ воркера")
+    parser.add_argument(
+        "--device",
+        choices=["cpu", "cuda"],
+        help="Устройство инференса (переопределяет env DEVICE и config.yaml)",
+    )
     args = parser.parse_args()
+
+    # Флаг командной строки имеет приоритет: пробрасываем его в env,
+    # откуда его читает config.get_device() при загрузке модели.
+    if args.device:
+        os.environ["DEVICE"] = args.device
 
     if args.rabbit_worker:
         run_rabbit_worker()
