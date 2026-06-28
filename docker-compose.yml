@@ -6,17 +6,17 @@ services:
         # Целевое устройство сборки: cuda ставит nvidia-библиотеки, cpu — нет.
         # Для CPU поменяйте на cpu (и DEVICE=cpu ниже + закомментируйте deploy).
         DEVICE: cuda
-    image: whisper-service:0.2.1-gpu
+    image: whisper-service:0.2.2-gpu
     container_name: whisper-service
     ports:
-      - "8000:8000"
+      - "8005:8000"
     volumes:
       # Хранение моделей на хосте для переиспользования между перезапусками
       - ./app/models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
       # RabbitMQ конфигурация
-      - RABBIT_HOST=192.168.1.111
+      - RABBIT_HOST=rabbitmq.lan
       - RABBIT_PORT=5672
       - RABBIT_USER=guest
       - RABBIT_PASSWORD=guest
