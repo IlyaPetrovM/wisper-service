@@ -4,6 +4,7 @@ import sys
 import argparse
 from server import create_app
 from rabbit_interface import RabbitInterface
+from core import preload_configured_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +16,9 @@ def run_rabbit_worker():
         logger.info("Запуск RabbitMQ воркера...")
         rabbit = RabbitInterface()
         rabbit.connect()
+        # Предзагрузка встроенной модели в память ДО начала приёма сообщений,
+        # чтобы любой воркер мог сразу обрабатывать transcribe без отдельного load_model.
+        preload_configured_model()
         rabbit.start_consuming()
     except KeyboardInterrupt:
         logger.info("RabbitMQ воркер остановлен")

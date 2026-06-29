@@ -147,6 +147,69 @@ def load_model_sync(model_size: str, model_url: Optional[str] = None) -> Tuple[b
         return False, msg
 
 
+def preload_local_model(key: str, model_dir: str) -> Tuple[bool, str]:
+    """
+    Предзагрузить модель из локального каталога (встроенного в образ) под заданным ключом.
+
+    В отличие от load_model_sync здесь model_dir передаётся в WhisperModel как путь к
+    готовым файлам модели — без обращения к HuggingFace и без скачивания. Ключ key — это
+    то имя, под которым клиенты запрашивают модель в командах transcribe/load_model.
+
+    Args:
+        key: ключ, под которым модель регистрируется в словаре models
+        model_dir: путь к каталогу с файлами модели (model.bin, tokenizer.json и т.д.)
+    """
+    try:
+        if is_model_loaded(key):
+            msg = f"Модель {key} уже загружена"
+            logger.info(msg)
+            return True, msg
+
+        model_path = Path(model_dir)
+        if not model_path.exists():
+            msg = f"Каталог модели не найден: {model_dir}"
+            logger.error(msg)
+            return False, msg
+
+        device = get_device()
+        compute_type = get_compute_type()
+        logger.info(f"Предзагрузка модели '{key}' из {model_dir} на устройстве {device} (compute_type={compute_type})...")
+
+        models[key] = WhisperModel(
+            str(model_path),
+            device=device,
+            compute_type=compute_type,
+        )
+
+        msg = f"Модель {key} предзагружена из {model_dir}"
+        logger.info(msg)
+        return True, msg
+
+    except Exception as e:
+        msg = f"Ошибка предзагрузки модели {key}: {str(e)}"
+        logger.error(msg)
+        return False, msg
+
+
+def preload_configured_model() -> Tuple[bool, str]:
+    """
+    Предзагрузить встроенную модель, сконфигурированную через окружение.
+
+    Читает MODEL_REPO (ключ, под которым модель запрашивают клиенты) и MODEL_DIR (путь к
+    встроенным файлам модели). Если обе переменные заданы — регистрирует модель в памяти.
+    Возвращает (успех, сообщение); (True, ...) с пояснением, если предзагрузка не настроена.
+    """
+    model_repo = os.getenv("MODEL_REPO")
+    model_dir = os.getenv("MODEL_DIR")
+
+    if not model_repo or not model_dir:
+        msg = "MODEL_REPO/MODEL_DIR не заданы — предзагрузка пропущена"
+        logger.info(msg)
+        return True, msg
+
+    return preload_local_model(model_repo, model_dir)
+
+
 def get_loaded_models() -> List[str]:
     """Получить список загруженных моделей"""
     return list(models.keys())

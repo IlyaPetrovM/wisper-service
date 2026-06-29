@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from fastapi_routes import router
+from core import preload_configured_model
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
-        logger.info("Сервис транскрибации инициализирован (модели загружаются по требованию)")
+        # Предзагружаем встроенную модель (если настроена через MODEL_REPO/MODEL_DIR),
+        # остальные модели грузятся по требованию.
+        preload_configured_model()
+        logger.info("Сервис транскрибации инициализирован")
 
     return app
