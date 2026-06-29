@@ -1,5 +1,5 @@
 # FROM python:3.11.15-slim
-FROM python_ffmpeg_libs:gpu
+FROM python_ffmpeg_libs:cpu-model
 
 # Целевое устройство: cpu (по умолчанию) или cuda.
 # При cuda дополнительно ставятся nvidia-cublas-cu12 / nvidia-cudnn-cu12.

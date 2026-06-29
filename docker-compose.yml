@@ -6,7 +6,7 @@ services:
         # Целевое устройство сборки: cuda ставит nvidia-библиотеки, cpu — нет.
         # Для CPU поменяйте на cpu (и DEVICE=cpu ниже + закомментируйте deploy).
         DEVICE: cuda
-    image: whisper-service:0.2.2-gpu
+    image: whisper-service:0.2.3
     container_name: whisper-service
     ports:
       - "8005:8000"
@@ -25,17 +25,17 @@ services:
       - QUEUE_IN=wisper_in
       - QUEUE_OUT=wisper_out
       # Имя воркера
-      - WORKER_NAME=wisper-GPU
+      - WORKER_NAME=wisper
       # Устройство инференса в рантайме. Для CPU поставьте cpu.
-      - DEVICE=cuda
+      - DEVICE=cpu
 
     restart: always
     # GPU-секция нужна только для DEVICE=cuda.
     # Для CPU-режима закомментируйте весь блок deploy ниже.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
