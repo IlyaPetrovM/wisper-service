@@ -6,57 +6,76 @@
 
 Сервис использует модель **faster-whisper** (medium) в режиме CPU для оффлайн транскрибирования аудио файлов. Реализован на FastAPI с поддержкой Docker контейнеризации.
 
-## Возможности
-
 - Транскрибирование русскоязычного аудио в SRT формат
 - Работа в оффлайн режиме (модель скачивается при первом запуске)
 - Поддержка множества аудио форматов: mp3, wav, m4a, flac, ogg, opus, webm
 - Автоматическая фильтрация пауз (VAD)
 - REST API с автоматической документацией (Swagger/OpenAPI)
 
-## Установка и запуск
+## Взаимодействие через RabbitMQ сервер
 
-### Вариант 1: Запуск через Docker Compose (рекомендуется)
+Сервис может работать в режиме RabbitMQ воркера для получения команд от мастер-узла.
 
-```bash
-# Запуск сервиса
-docker-compose up -d
-
-# Просмотр логов
-docker-compose logs -f
-
-# Остановка сервиса
-docker-compose down
-```
-
-При первом запуске модель medium (~1.5GB) будет загружена автоматически. Модель сохраняется в директории `./models` и переиспользуется при перезапусках.
-
-### Вариант 2: Запуск через Docker
+### Запуск RabbitMQ воркера
 
 ```bash
-# Сборка образа
-docker build -t whisper-service .
+# Локально
+python main.py --rabbit-worker
 
-# Запуск контейнера
-docker run -d -p 8000:8000 -v ./models:/app/models whisper-service
+# В Docker
+docker run -e RABBIT_WORKER=1 whisper-service
+
+# Через Docker Compose
+docker-compose -f docker-compose.yml run -e RABBIT_WORKER=1 whisper-service
 ```
 
-### Вариант 3: Локальный запуск (без Docker)
+### Формат входящих сообщений (очередь `whisper_in`)
 
-```bash
-# Установка зависимостей
-pip install -r requirements.txt
+#### Загрузка модели
 
-# Установка FFmpeg (если не установлен)
-# Windows: скачать с https://ffmpeg.org/download.html
-# Linux: apt-get install ffmpeg
-# macOS: brew install ffmpeg
-
-# Запуск сервиса
-uvicorn main:app --host 0.0.0.0 --port 8000
+```json
+{
+  "command": "load_model",
+  "model_size": "small",
+  "correlation_id": "model-load-456",
+  "task_id":"load_model-1"
+}
 ```
 
-## Использование API
+#### Транскрибирование по URL
+
+```json
+{
+  "command": "transcribe",
+  "task_id":"dufvudfuudfgku-1",
+  "model_size": "small",
+  "format": "json",
+  "file_url": "http://10.254.212.179:3001/api/files/audio_short.mp3",
+  "correlation_id": "uuid"
+}
+```
+
+**Параметры:**
+- `command`: `"transcribe"` или `"load_model"`
+- `model_size`: `"small"`, `"medium"` или `"large"`
+- `format`: `"srt"` или `"json"` (только для transcribe)
+- `file_url`: URL аудио файла (только для transcribe)
+- `correlation_id`: уникальный ID для связи запроса и ответа
+
+
+### API Endpoints
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | `/` | Информация о сервисе |
+| GET | `/health` | Health check |
+| POST | `/transcribe` | Транскрибирование аудио (загрузка файла или по URL) |
+| GET | `/models` | Информация о доступных моделях |
+| GET | `/docs` | Swagger UI документация |
+| GET | `/redoc` | ReDoc документация |
+
+
+## Взаимодействие через REST API
 
 ### Веб-интерфейс (Swagger UI)
 
@@ -117,56 +136,54 @@ curl http://localhost:8000/
 curl http://localhost:8000/health
 ```
 
-## API Endpoints
 
-| Метод | Endpoint | Описание |
-|-------|----------|----------|
-| GET | `/` | Информация о сервисе |
-| GET | `/health` | Health check |
-| POST | `/transcribe` | Транскрибирование аудио (загрузка файла или по URL) |
-| GET | `/models` | Информация о доступных моделях |
-| GET | `/docs` | Swagger UI документация |
-| GET | `/redoc` | ReDoc документация |
+## Установка и запуск
 
-## Технические детали
+### Вариант 1: Запуск через Docker Compose (рекомендуется)
 
-- **Модель**: faster-whisper medium
-- **Язык**: Русский (ru)
-- **Режим**: CPU с оптимизацией int8
-- **VAD**: Включена фильтрация пауз (минимальная тишина 500ms)
-- **Формат вывода**: SRT (SubRip)
+```bash
+# Запуск сервиса
+docker-compose up -d
 
-## Структура проекта
+# Просмотр логов
+docker-compose logs -f
 
-```
-whisper-service/
-├── main.py              # Основное приложение FastAPI
-├── requirements.txt     # Python зависимости
-├── Dockerfile          # Docker образ
-├── docker-compose.yml  # Docker Compose конфигурация
-├── .dockerignore       # Исключения для Docker
-├── .gitignore          # Исключения для Git
-├── readme.md           # Документация
-└── models/             # Директория для хранения моделей (создается автоматически)
+# Остановка сервиса
+docker-compose down
 ```
 
-## Производительность
+При первом запуске модель medium (~1.5GB) будет загружена автоматически. Модель сохраняется в директории `./models` и переиспользуется при перезапусках.
 
-Модель **medium** обеспечивает хороший баланс между точностью и скоростью на CPU:
-- Размер модели: ~1.5GB
-- Время обработки: ~1-2x реального времени аудио (зависит от CPU)
-- Точность: высокая для русского языка
+### Вариант 2: Запуск через Docker
 
-## Примечания
+```bash
+# Сборка образа
+docker build -t whisper-service .
 
-- Первый запуск может занять время из-за загрузки модели
-- Для работы требуется FFmpeg
-- Сервис полностью автономный (оффлайн) после загрузки модели
-- Модель кэшируется в директории `./models` на хосте
+# Запуск контейнера
+docker run -d -p 8000:8000 -v ./models:/app/models whisper-service
+```
 
-# Standalone установка
+### Вариант 3: Локальный запуск (без Docker)
 
-## 1 Подготовка 
+```bash
+# Установка зависимостей
+pip install -r requirements.txt
+
+# Установка FFmpeg (если не установлен)
+# Windows: скачать с https://ffmpeg.org/download.html
+# Linux: apt-get install ffmpeg
+# macOS: brew install ffmpeg
+
+# Запуск веб-сервера
+python main.py
+
+# Запуск RabbitMQ воркера
+python main.py --rabbit-worker
+```
+
+
+#### 1 Подготовка 
 1. Установить NSIS
 https://nsis.sourceforge.io/Download
 
@@ -184,7 +201,7 @@ https://github.com/Nestorchik/embedded_python_3.11.6/archive/refs/heads/main.zip
 ```
 .\python.exe -m pip install -r ..\..\..\requirements.txt
 ```
-## 2 Сборка
+#### 2 Сборка
 
 Перейдите в папку installer
 
@@ -193,3 +210,6 @@ https://github.com/Nestorchik/embedded_python_3.11.6/archive/refs/heads/main.zip
 ```
 > 'C:\Program Files (x86)\NSIS\makensis.exe' .\installer\whisper-service.nsi
 ```
+
+
+

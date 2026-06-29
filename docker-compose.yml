@@ -1,13 +1,41 @@
 services:
   whisper-service:
-    build: .
-    image: whisper-service:0.0.4
+    build:
+      context: .
+      args:
+        # Целевое устройство сборки: cuda ставит nvidia-библиотеки, cpu — нет.
+        # Для CPU поменяйте на cpu (и DEVICE=cpu ниже + закомментируйте deploy).
+        DEVICE: cuda
+    image: whisper-service:0.2.4-cuda
     container_name: whisper-service
     ports:
-      - "8000:8000"
-    volumes:
+      - "8005:8000"
+    # volumes:
       # Хранение моделей на хосте для переиспользования между перезапусками
-      - ./app/models:/app/models
+      # - ./app/models:/app/models
     environment:
       - PYTHONUNBUFFERED=1
-    restart: unless-stopped
+      # RabbitMQ конфигурация
+      - RABBIT_HOST=rabbitmq.lan
+      - RABBIT_PORT=5672
+      - RABBIT_USER=guest
+      - RABBIT_PASSWORD=guest
+      - RABBIT_HEARTBEAT=600
+      # Названия очередей
+      - QUEUE_IN=wisper_in
+      - QUEUE_OUT=wisper_out
+      # Имя воркера
+      - WORKER_NAME=wisper
+      # Устройство инференса в рантайме. Для CPU поставьте cpu.
+      - DEVICE=cuda
+
+    restart: always
+    # GPU-секция нужна только для DEVICE=cuda.
+    # Для CPU-режима закомментируйте весь блок deploy ниже.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

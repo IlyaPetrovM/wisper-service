@@ -1,0 +1,5 @@
+# CUDA-only dependencies. Installed by the Docker build only when DEVICE=cuda.
+# Not needed for CPU images.
+# Версии зафиксированы по образу whisper-service:0.2.0-gpu.
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.23.2.1
