@@ -2,6 +2,9 @@
 
 Микросервис для транскрибирования русскоязычного аудио в SRT файлы.
 
+<img width="972" height="608" alt="image" src="https://github.com/user-attachments/assets/f93363c4-ef3f-444e-8ae9-2043f5040caa" />
+
+
 ## Описание
 
 Сервис использует модель **faster-whisper** (medium) в режиме CPU для оффлайн транскрибирования аудио файлов. Реализован на FastAPI с поддержкой Docker контейнеризации.
